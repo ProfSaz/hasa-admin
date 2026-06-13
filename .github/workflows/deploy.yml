@@ -1,0 +1,80 @@
+# ============================================
+# HasaPay Admin - CI/CD Pipeline
+# Builds Docker image → Pushes to ECR → SSM tells the dashboard EC2 to
+# docker compose pull + up -d the `admin` service (runs alongside the dashboard).
+# ============================================
+
+name: Deploy Admin
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-east-2
+  ECR_REPOSITORY: hasapay-admin
+  # Same box as the dashboard — admin runs as a second container on host port 3001.
+  INSTANCE_ID: i-0e183aa9cc138dde3
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker build \
+            --platform linux/amd64 \
+            --build-arg NEXT_PUBLIC_API_URL=https://api.hasapay.com \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG \
+            -t $ECR_REGISTRY/$ECR_REPOSITORY:latest \
+            .
+
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+      - name: Deploy to EC2 via SSM
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          COMMAND_ID=$(aws ssm send-command \
+            --instance-ids ${{ env.INSTANCE_ID }} \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands='["cd /home/ubuntu/dashboard","aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin '"$ECR_REGISTRY"'","docker compose pull admin","docker compose up -d admin","docker image prune -af","sleep 3","docker ps | grep hasapay-admin","echo Deployment complete!"]' \
+            --query 'Command.CommandId' \
+            --output text)
+
+          echo "Command ID: $COMMAND_ID"
+          echo "Waiting for deployment..."
+
+          sleep 30
+
+          aws ssm get-command-invocation \
+            --command-id $COMMAND_ID \
+            --instance-id ${{ env.INSTANCE_ID }} \
+            --query '[Status, StandardOutputContent, StandardErrorContent]' \
+            --output text
+
+      - name: Health check
+        run: |
+          sleep 10
+          curl -f https://admin.hasapay.com || echo "Health check pending (DNS/Caddy not wired yet)"
