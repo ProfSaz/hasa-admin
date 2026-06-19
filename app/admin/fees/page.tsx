@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Loader2, Save, Trash2, Pencil, X, Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { adminFeesApi, FeeConfiguration } from '@/lib/api/adminFees';
-import { adminOrgsApi } from '@/lib/api/organizations';
+import { adminOrgsApi, AdminOrganization } from '@/lib/api/organizations';
 import { chainsApi, SupportedChain } from '@/lib/api/chains';
 import { assetsApi, SupportedAsset } from '@/lib/api/assets';
 import { confirmDialog } from '@/lib/stores/confirmStore';
@@ -21,21 +21,30 @@ export default function FeesPage() {
   const [saving, setSaving] = useState(false);
   const [editorOrg, setEditorOrg] = useState<string | null>(null);
   const [lookupId, setLookupId] = useState('');
-  const [orgNames, setOrgNames] = useState<Record<string, string>>({});
+  const [orgList, setOrgList] = useState<AdminOrganization[]>([]);
+  const orgNames = Object.fromEntries(orgList.map((o) => [o.id, o.name]));
 
-  // Resolve org UUIDs → names for display.
+  // Load the full org list (every org always shows, regardless of override state).
   useEffect(() => {
-    adminOrgsApi.list()
-      .then((orgs) => setOrgNames(Object.fromEntries(orgs.map((o) => [o.id, o.name]))))
-      .catch(() => {});
+    adminOrgsApi.list().then(setOrgList).catch(() => {});
   }, []);
   const orgLabel = (id?: string | null) => (id && orgNames[id]) || id || '—';
 
   const load = async (t: Tab) => {
     setLoading(true);
     try {
-      if (t === 'platform') setPlatform(await adminFeesApi.getPlatform());
-      else setOrgs((await adminFeesApi.listOrgConfigs(100, 0)).configs);
+      if (t === 'platform') {
+        setPlatform(await adminFeesApi.getPlatform());
+      } else {
+        // Orgs tab needs both the per-org overrides AND the platform defaults, so
+        // orgs without an override can be shown using the platform values.
+        const [cfgs, plat] = await Promise.all([
+          adminFeesApi.listOrgConfigs(100, 0),
+          adminFeesApi.getPlatform(),
+        ]);
+        setOrgs(cfgs.configs);
+        setPlatform(plat);
+      }
     } catch {
       toast.error('Failed to load fee config');
     } finally {
@@ -136,8 +145,8 @@ export default function FeesPage() {
         <div className="bg-[#18181b] border border-[#A1A1A120] rounded-xl p-3 md:p-6">
           <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-3 mb-6">
             <div>
-              <h2 className="text-lg font-semibold text-[#F9F9F9] mb-1">Organizations with custom fees</h2>
-              <p className="text-[#FFFFFF60] text-sm">{orgs.length} override{orgs.length === 1 ? '' : 's'}</p>
+              <h2 className="text-lg font-semibold text-[#F9F9F9] mb-1">Organization fees</h2>
+              <p className="text-[#FFFFFF60] text-sm">{orgList.length} organization{orgList.length === 1 ? '' : 's'} · {orgs.length} with custom override{orgs.length === 1 ? '' : 's'}</p>
             </div>
             <div className="flex items-center gap-2">
               <input
@@ -154,14 +163,15 @@ export default function FeesPage() {
               </button>
             </div>
           </div>
-          {orgs.length === 0 ? (
-            <div className="text-center py-12 text-[#FFFFFF60]">No org-specific overrides — all orgs use platform defaults.</div>
+          {orgList.length === 0 ? (
+            <div className="text-center py-12 text-[#FFFFFF60]">No organizations yet.</div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-xs md:text-sm">
+              <table className="w-full min-w-[680px] text-xs md:text-sm">
                 <thead>
                   <tr className="border-b border-[#A1A1A120]">
                     <th className="text-left font-medium text-[#FFFFFF60] pb-4 pr-6">Organization</th>
+                    <th className="text-left font-medium text-[#FFFFFF60] pb-4 pr-6">Source</th>
                     <th className="text-left font-medium text-[#FFFFFF60] pb-4 pr-6">Deposit</th>
                     <th className="text-left font-medium text-[#FFFFFF60] pb-4 pr-6">Withdrawal</th>
                     <th className="text-left font-medium text-[#FFFFFF60] pb-4 pr-6">Rev Share</th>
@@ -169,33 +179,50 @@ export default function FeesPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {orgs.map((c) => (
-                    <tr key={c.id} className="border-b border-[#A1A1A120] hover:bg-[#FFFFFF05]">
-                      <td className="py-3 pr-6 text-[#F9F9F9]">
-                        <div>{orgLabel(c.organization_id)}</div>
-                        <div className="font-mono text-[10px] text-[#FFFFFF60]">{c.organization_id?.slice(0, 8)}</div>
-                      </td>
-                      <td className="py-3 pr-6">{c.deposit_fee_enabled ? `${pct(c.deposit_fee_rate)}%` : 'off'}</td>
-                      <td className="py-3 pr-6">{c.withdrawal_fee_enabled ? `${pct(c.withdrawal_fee_rate)}%` : 'off'}</td>
-                      <td className="py-3 pr-6">{c.rev_share_enabled ? `${pct(c.rev_share_percentage)}%` : 'off'}</td>
-                      <td className="py-3 text-right whitespace-nowrap">
-                        <div className="inline-flex gap-2">
-                          <button
-                            onClick={() => setEditorOrg(c.organization_id!)}
-                            className="inline-flex items-center gap-1 text-[11px] text-[#FFFFFF80] border border-[#A1A1A120] rounded-lg px-2 py-1.5 hover:bg-[#FFFFFF10] cursor-pointer"
-                          >
-                            <Pencil size={13} /> Edit
-                          </button>
-                          <button
-                            onClick={() => revertOrg(c.organization_id!)}
-                            className="inline-flex items-center gap-1 text-[11px] text-[#dc2626] border border-[#dc262640] rounded-lg px-2 py-1.5 hover:bg-[#dc262620] cursor-pointer"
-                          >
-                            <Trash2 size={13} /> Revert
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {orgList.map((o) => {
+                    // Per-org override if one exists, else fall back to the platform default
+                    // so every org always shows a complete, effective fee picture.
+                    const cfg = orgs.find((c) => c.organization_id === o.id) || null;
+                    const eff = cfg ?? platform;
+                    const cell = (enabled?: boolean, rate?: number) =>
+                      eff && enabled ? `${pct(rate ?? 0)}%` : eff ? 'off' : '—';
+                    return (
+                      <tr key={o.id} className="border-b border-[#A1A1A120] hover:bg-[#FFFFFF05]">
+                        <td className="py-3 pr-6 text-[#F9F9F9]">
+                          <div>{o.name}</div>
+                          <div className="font-mono text-[10px] text-[#FFFFFF60]">{o.id.slice(0, 8)}</div>
+                        </td>
+                        <td className="py-3 pr-6">
+                          {cfg ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] border bg-[#007acc20] text-[#3b9fe0] border-[#007acc40]">Custom</span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] border bg-[#FFFFFF10] text-[#FFFFFF60] border-[#A1A1A120]">Platform default</span>
+                          )}
+                        </td>
+                        <td className="py-3 pr-6">{cell(eff?.deposit_fee_enabled, eff?.deposit_fee_rate)}</td>
+                        <td className="py-3 pr-6">{cell(eff?.withdrawal_fee_enabled, eff?.withdrawal_fee_rate)}</td>
+                        <td className="py-3 pr-6">{cell(eff?.rev_share_enabled, eff?.rev_share_percentage)}</td>
+                        <td className="py-3 text-right whitespace-nowrap">
+                          <div className="inline-flex gap-2">
+                            <button
+                              onClick={() => setEditorOrg(o.id)}
+                              className="inline-flex items-center gap-1 text-[11px] text-[#FFFFFF80] border border-[#A1A1A120] rounded-lg px-2 py-1.5 hover:bg-[#FFFFFF10] cursor-pointer"
+                            >
+                              <Pencil size={13} /> {cfg ? 'Edit' : 'Customize'}
+                            </button>
+                            {cfg && (
+                              <button
+                                onClick={() => revertOrg(o.id)}
+                                className="inline-flex items-center gap-1 text-[11px] text-[#dc2626] border border-[#dc262640] rounded-lg px-2 py-1.5 hover:bg-[#dc262620] cursor-pointer"
+                              >
+                                <Trash2 size={13} /> Revert
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
