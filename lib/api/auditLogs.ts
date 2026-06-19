@@ -22,6 +22,7 @@ export interface AuditLog {
 export interface AuditLogFilters {
   action?: string;
   resource?: string;
+  actorType?: string; // admin | organization | system
   limit?: number;
   offset?: number;
 }
@@ -34,6 +35,7 @@ export const adminAuditApi = {
     };
     if (filters.action) params.action = filters.action;
     if (filters.resource) params.resource = filters.resource;
+    if (filters.actorType) params.actor_type = filters.actorType;
 
     const response = await apiClient.get('/admin/audit-logs', { params });
     const data = response.data.data || {};

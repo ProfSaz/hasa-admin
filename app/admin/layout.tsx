@@ -6,6 +6,8 @@ import { Loader2 } from 'lucide-react';
 import { Toaster } from 'sonner';
 import { AdminHeader } from '@/components/admin/AdminHeader';
 import { AdminSidebar } from '@/components/admin/AdminSidebar';
+import { StepUpModal } from '@/components/admin/StepUpModal';
+import { ConfirmModal } from '@/components/admin/ConfirmModal';
 import { ADMIN_TOKEN_KEY } from '@/lib/api/client';
 
 export default function AdminLayout({
@@ -39,6 +41,8 @@ export default function AdminLayout({
   return (
     <div className="flex h-screen bg-[#09090b] text-white">
       <Toaster position="top-right" richColors theme="dark" />
+      <StepUpModal />
+      <ConfirmModal />
       <AdminSidebar
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}

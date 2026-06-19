@@ -11,6 +11,14 @@ import {
   Server,
   ScrollText,
   Banknote,
+  ShieldCheck,
+  ArrowLeftRight,
+  Receipt,
+  Landmark,
+  Scale,
+  Coins,
+  Network,
+  AlertTriangle,
   LogOut,
   ChevronRight,
   X
@@ -18,6 +26,7 @@ import {
 import { useAdminAuthStore } from '@/lib/stores/authStores';
 import { adminAuthApi, adminRoleLabel } from '@/lib/api/auth';
 import { clearAdminToken } from '@/lib/api/client';
+import { hasPerm, type AdminPerm } from '@/lib/permissions';
 
 interface NavItemProps {
   icon: React.ReactNode;
@@ -63,6 +72,23 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ isOpen, onClose }) =
   const displayName = admin?.full_name || 'Admin';
   const initial = displayName.charAt(0).toUpperCase();
 
+  const navItems: { icon: React.ReactNode; label: string; href: string; perm?: AdminPerm }[] = [
+    { icon: <LayoutGrid size={16} />, label: 'Dashboard', href: '/admin' },
+    { icon: <Users size={16} />, label: 'Users', href: '/admin/users', perm: 'org:view' },
+    { icon: <Building2 size={16} />, label: 'Organizations', href: '/admin/organizations', perm: 'org:view' },
+    { icon: <ArrowLeftRight size={16} />, label: 'Transactions', href: '/admin/transactions', perm: 'org:view' },
+    { icon: <Banknote size={16} />, label: 'Payouts', href: '/admin/payouts', perm: 'payout:manage' },
+    { icon: <Receipt size={16} />, label: 'Fees', href: '/admin/fees', perm: 'fee:config' },
+    { icon: <Landmark size={16} />, label: 'Treasury', href: '/admin/treasury', perm: 'treasury:view' },
+    { icon: <Scale size={16} />, label: 'Reconciliation', href: '/admin/reconciliation', perm: 'reconcile' },
+    { icon: <Coins size={16} />, label: 'Assets', href: '/admin/assets', perm: 'chain:manage' },
+    { icon: <Network size={16} />, label: 'Chains & RPC', href: '/admin/chains', perm: 'chain:manage' },
+    { icon: <AlertTriangle size={16} />, label: 'DLQ', href: '/admin/dlq', perm: 'dlq:review' },
+    { icon: <Server size={16} />, label: 'System', href: '/admin/system', perm: 'dlq:review' },
+    { icon: <ScrollText size={16} />, label: 'Audit Logs', href: '/admin/audit-logs', perm: 'org:view' },
+    { icon: <ShieldCheck size={16} />, label: 'Admins', href: '/admin/admins', perm: 'admin:manage' },
+  ];
+
   return (
     <>
       {/* Overlay - only visible on mobile */}
@@ -102,60 +128,21 @@ export const AdminSidebar: React.FC<AdminSidebarProps> = ({ isOpen, onClose }) =
           </button>
         </div>
 
-        {/* Navigation */}
+        {/* Navigation — items are filtered by the admin's role (RBAC). */}
         <nav className="flex-1 p-3.5 overflow-y-auto">
           <div className="text-[13px] text-[#FFFFFF60] font-semibold mb-1 px-2">Administration</div>
-          <NavItem
-            icon={<LayoutGrid size={16} />}
-            label="Dashboard"
-            href="/admin"
-            active={pathname === '/admin'}
-            onClick={onClose}
-          />
-          <NavItem
-            icon={<Users size={16} />}
-            label="Users"
-            href="/admin/users"
-            active={pathname === '/admin/users'}
-            onClick={onClose}
-          />
-          <NavItem
-            icon={<Building2 size={16} />}
-            label="Organizations"
-            href="/admin/organizations"
-            active={pathname === '/admin/organizations'}
-            onClick={onClose}
-          />
-          <NavItem
-            icon={<Banknote size={16} />}
-            label="Payouts"
-            href="/admin/payouts"
-            active={pathname === '/admin/payouts'}
-            onClick={onClose}
-          />
-          <NavItem
-            icon={<Server size={16} />}
-            label="System"
-            href="/admin/system"
-            active={pathname === '/admin/system'}
-            onClick={onClose}
-          />
-          <NavItem
-            icon={<ScrollText size={16} />}
-            label="Audit Logs"
-            href="/admin/audit-logs"
-            active={pathname === '/admin/audit-logs'}
-            onClick={onClose}
-          />
-
-          <div className="text-[13px] text-[#FFFFFF60] font-semibold mb-1 px-2 mt-6">Quick Actions</div>
-          {/* <NavItem
-            icon={<ArrowLeft size={16} />}
-            label="User Dashboard"
-            href="/dashboard"
-            active={false}
-            onClick={onClose}
-          /> */}
+          {navItems
+            .filter((item) => !item.perm || hasPerm(admin?.role, item.perm))
+            .map((item) => (
+              <NavItem
+                key={item.href}
+                icon={item.icon}
+                label={item.label}
+                href={item.href}
+                active={pathname === item.href}
+                onClick={onClose}
+              />
+            ))}
         </nav>
 
         {/* User Profile */}

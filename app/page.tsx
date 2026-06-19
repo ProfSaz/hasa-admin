@@ -1,15 +1,24 @@
 "use client"
 
 import React, { useState, useEffect } from 'react';
-import { Eye, EyeOff, Check, Loader2 } from 'lucide-react';
+import { Eye, EyeOff, Check, Loader2, ShieldCheck, Copy, KeyRound } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Image from "next/image";
+import { QRCodeSVG } from 'qrcode.react';
 import { toast, Toaster } from 'sonner';
-import { adminAuthApi } from '@/lib/api/auth';
+import { adminAuthApi, type Admin } from '@/lib/api/auth';
+import { adminMfaApi } from '@/lib/api/mfa';
 import { useAdminAuthStore } from '@/lib/stores/authStores';
-import { setAdminToken } from '@/lib/api/client';
+import { setAdminTokens } from '@/lib/api/client';
 
-type Step = 'organization' | 'credentials' | 'signin' | 'verification';
+type Step =
+  | 'organization'
+  | 'credentials'
+  | 'signin'
+  | 'verification'
+  | 'mfa-code'      // enrolled admin: enter TOTP / backup code to finish login
+  | 'mfa-enroll'    // first login: scan QR + confirm code
+  | 'backup-codes'; // show one-time backup codes after enrollment
 
 const HasaPayOnboarding = () => {
   const router = useRouter();
@@ -24,7 +33,17 @@ const HasaPayOnboarding = () => {
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [resendTimer, setResendTimer] = useState(59);
   const [showSuccessToast, setShowSuccessToast] = useState(false);
-  
+
+  // MFA flow state
+  const [challengeToken, setChallengeToken] = useState('');
+  const [pendingAdmin, setPendingAdmin] = useState<Admin | null>(null);
+  const [useBackupCode, setUseBackupCode] = useState(false);
+  const [backupCodeInput, setBackupCodeInput] = useState('');
+  const [enrollData, setEnrollData] = useState<{ secret: string; otpauth_url: string } | null>(null);
+  const [enrollCode, setEnrollCode] = useState('');
+  const [backupCodes, setBackupCodes] = useState<string[]>([]);
+  const [savedAck, setSavedAck] = useState(false);
+
   // Separate sign in data
   const [signInData, setSignInData] = useState({
     email: '',
@@ -58,28 +77,105 @@ const HasaPayOnboarding = () => {
     setSignInData(prev => ({ ...prev, [field]: value }));
   };
 
-  // Handle Sign In — real admin authentication
+  // Finalize a successful login: persist the access + refresh tokens and route in.
+  const completeLogin = (token: string, refreshToken: string, admin: Admin) => {
+    setAuth(token, admin);
+    setAdminTokens(token, refreshToken);
+    toast.success('Welcome back');
+    router.push('/admin');
+  };
+
+  // Step 1 — password. On success we get a short-lived MFA challenge token and
+  // whether MFA is enrolled. Enrolled → prompt for a code; not enrolled → force
+  // enrollment. No session token is issued here.
   const handleSignIn = async () => {
     if (!signInData.email || !signInData.password) return;
 
     setIsLoading(true);
     try {
-      const { token, admin } = await adminAuthApi.login({
+      const res = await adminAuthApi.login({
         email: signInData.email,
         password: signInData.password,
       });
 
-      setAuth(token, admin);
-      setAdminToken(token);
+      setChallengeToken(res.challenge_token);
+      setPendingAdmin(res.admin);
+      setOtp(['', '', '', '', '', '']);
+      setUseBackupCode(false);
+      setBackupCodeInput('');
 
-      toast.success('Welcome back');
-      router.push('/admin');
+      if (res.mfa_enrolled) {
+        setStep('mfa-code');
+      } else {
+        // First login: kick off enrollment immediately.
+        try {
+          const data = await adminMfaApi.enrollBegin(res.challenge_token);
+          setEnrollData(data);
+          setEnrollCode('');
+          setStep('mfa-enroll');
+        } catch (err: any) {
+          toast.error(err.response?.data?.error?.message || 'Could not start MFA setup');
+        }
+      }
     } catch (error: any) {
       const message = error.response?.data?.error?.message || 'Login failed. Please try again.';
       toast.error(message);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Step 2 (enrolled) — verify TOTP or backup code, then finish login.
+  const handleVerifyMfaCode = async () => {
+    const code = useBackupCode ? backupCodeInput.trim() : otp.join('');
+    if (!code) return;
+
+    setIsLoading(true);
+    try {
+      const { token, refresh_token, admin } = await adminAuthApi.loginMfa({ challenge_token: challengeToken, code });
+      completeLogin(token, refresh_token, admin);
+    } catch (error: any) {
+      const message = error.response?.data?.error?.message || 'Invalid verification code';
+      toast.error(message);
+      setOtp(['', '', '', '', '', '']);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // First-login enrollment — confirm the code, capture backup codes, auto-login.
+  const handleConfirmEnroll = async () => {
+    if (enrollCode.length < 6) return;
+
+    setIsLoading(true);
+    try {
+      const res = await adminMfaApi.enrollVerify(challengeToken, enrollCode);
+      setBackupCodes(res.backup_codes);
+      setSavedAck(false);
+      // The verify response carries a session (access + refresh) on first-login enrollment.
+      if (res.token && res.admin) {
+        setAuth(res.token, res.admin);
+        setAdminTokens(res.token, res.refresh_token);
+      }
+      setStep('backup-codes');
+    } catch (error: any) {
+      const message = error.response?.data?.error?.message || 'Invalid code. Try again.';
+      toast.error(message);
+      setEnrollCode('');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const copyBackupCodes = () => {
+    navigator.clipboard.writeText(backupCodes.join('\n'));
+    toast.success('Backup codes copied');
+  };
+
+  const finishBackupCodes = () => {
+    if (!savedAck) return;
+    toast.success('MFA enabled');
+    router.push('/admin');
   };
 
   const handleOtpChange = (index: number, value: string) => {
@@ -403,12 +499,8 @@ const HasaPayOnboarding = () => {
           )}
         </button>
 
-        <p className="text-[#FFFFFF60] text-xs text-center">
-          Don't have an account?{' '}
-          <button onClick={() => setStep('credentials')} className="text-[#007acc70] cursor-pointer">
-            Create one
-          </button>
-        </p>
+        {/* Admins are provisioned by a super_admin in the Admins page — no self
+            sign-up on the admin console. */}
       </div>
     </div>
   );
@@ -477,17 +569,197 @@ const HasaPayOnboarding = () => {
     </div>
   );
 
+  // ── MFA: enter a code (enrolled admin completing login) ──────────────────
+  const renderMfaCodeStep = () => (
+    <div className="flex-1 bg-black p-4 md:p-12 flex items-center justify-center col-span-4 overflow-y-auto">
+      <div className={`w-full max-w-md bg-[#18181b80] p-5 rounded-xl border border-[#A1A1A120] transition-transform duration-500 ${
+        isAnimating ? 'opacity-0 translate-y-8' : 'opacity-100 translate-y-0'
+      }`}>
+        <div className="flex justify-center mb-5">
+          <div className="w-14 h-14 bg-[#007acc]/20 rounded-full flex items-center justify-center">
+            <ShieldCheck className="w-7 h-7 text-[#007acc]" />
+          </div>
+        </div>
+        <h2 className="text-[#F9F9F9] text-2xl font-bold text-center mb-0.5">Two-factor authentication</h2>
+        <p className="text-[#FFFFFF60] text-[13px] text-center mb-1">
+          {useBackupCode
+            ? 'Enter one of your backup codes'
+            : 'Enter the 6-digit code from your authenticator app'}
+        </p>
+        {pendingAdmin && (
+          <p className="text-white text-xs text-center font-medium mb-4">{pendingAdmin.email}</p>
+        )}
+
+        {!useBackupCode ? (
+          <div className="flex gap-3 mb-4 justify-center" onPaste={handleOtpPaste}>
+            {otp.map((digit, index) => (
+              <input
+                key={index}
+                id={`otp-${index}`}
+                type="text"
+                inputMode="numeric"
+                maxLength={1}
+                value={digit}
+                onChange={(e) => handleOtpChange(index, e.target.value)}
+                onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                className="w-11 h-12 bg-zinc-900 border border-zinc-800 rounded-lg text-white text-xl text-center focus:outline-none focus:border-[#A1A1A140] transition-colors"
+              />
+            ))}
+          </div>
+        ) : (
+          <input
+            type="text"
+            value={backupCodeInput}
+            onChange={(e) => setBackupCodeInput(e.target.value)}
+            placeholder="XXXX-XXXX"
+            className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 text-white text-center tracking-widest focus:outline-none focus:border-[#A1A1A140] transition-colors mb-4"
+          />
+        )}
+
+        <button
+          onClick={handleVerifyMfaCode}
+          disabled={isLoading || (useBackupCode ? !backupCodeInput.trim() : otp.some((d) => !d))}
+          className="w-full bg-[#007acc70] text-white text-sm font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed mb-3 cursor-pointer flex items-center justify-center gap-2"
+        >
+          {isLoading ? (<><Loader2 size={16} className="animate-spin" />Verifying...</>) : 'Verify'}
+        </button>
+
+        <button
+          onClick={() => { setUseBackupCode(!useBackupCode); setBackupCodeInput(''); setOtp(['', '', '', '', '', '']); }}
+          className="w-full text-[#007acc70] text-xs cursor-pointer mb-2 flex items-center justify-center gap-1.5"
+        >
+          <KeyRound size={13} />
+          {useBackupCode ? 'Use authenticator app instead' : 'Use a backup code'}
+        </button>
+
+        <button
+          onClick={() => setStep('signin')}
+          className="w-full text-[#FFFFFF60] text-sm cursor-pointer transition-colors"
+        >
+          Back to login
+        </button>
+      </div>
+    </div>
+  );
+
+  // ── MFA: first-login enrollment (scan QR + confirm) ──────────────────────
+  const renderMfaEnrollStep = () => (
+    <div className="flex-1 bg-black p-4 md:p-12 flex items-center justify-center col-span-4 overflow-y-auto">
+      <div className={`w-full max-w-md bg-[#18181b80] p-5 rounded-xl border border-[#A1A1A120] transition-transform duration-500 ${
+        isAnimating ? 'opacity-0 translate-y-8' : 'opacity-100 translate-y-0'
+      }`}>
+        <h2 className="text-[#F9F9F9] text-2xl font-bold mb-0.5">Set up two-factor authentication</h2>
+        <p className="text-[#FFFFFF60] text-[13px] mb-4">
+          MFA is required for all admins. Scan the QR code with Google Authenticator, Authy, or 1Password.
+        </p>
+
+        {enrollData && (
+          <>
+            <div className="flex justify-center mb-4">
+              <div className="bg-white p-3 rounded-lg">
+                <QRCodeSVG value={enrollData.otpauth_url} size={160} />
+              </div>
+            </div>
+            <p className="text-[#FFFFFF60] text-[11px] text-center mb-1">Can&apos;t scan? Enter this key manually:</p>
+            <p className="text-[#F9F9F9] text-xs text-center font-mono break-all bg-zinc-900 border border-zinc-800 rounded-md px-2 py-1.5 mb-4">
+              {enrollData.secret}
+            </p>
+          </>
+        )}
+
+        <label className="text-[#F9F9F9] text-sm font-medium mb-1.5 block">Enter the 6-digit code to confirm</label>
+        <input
+          type="text"
+          inputMode="numeric"
+          maxLength={6}
+          value={enrollCode}
+          onChange={(e) => setEnrollCode(e.target.value.replace(/\D/g, ''))}
+          placeholder="123456"
+          className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2.5 text-white text-center tracking-[0.5em] focus:outline-none focus:border-[#A1A1A140] transition-colors mb-4"
+        />
+
+        <button
+          onClick={handleConfirmEnroll}
+          disabled={isLoading || enrollCode.length < 6}
+          className="w-full bg-[#007acc70] text-white text-sm font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed mb-3 cursor-pointer flex items-center justify-center gap-2"
+        >
+          {isLoading ? (<><Loader2 size={16} className="animate-spin" />Confirming...</>) : 'Enable MFA'}
+        </button>
+
+        <button
+          onClick={() => setStep('signin')}
+          className="w-full text-[#FFFFFF60] text-sm cursor-pointer transition-colors"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+
+  // ── MFA: show one-time backup codes (shown once) ─────────────────────────
+  const renderBackupCodesStep = () => (
+    <div className="flex-1 bg-black p-4 md:p-12 flex items-center justify-center col-span-4 overflow-y-auto">
+      <div className={`w-full max-w-md bg-[#18181b80] p-5 rounded-xl border border-[#A1A1A120] transition-transform duration-500 ${
+        isAnimating ? 'opacity-0 translate-y-8' : 'opacity-100 translate-y-0'
+      }`}>
+        <h2 className="text-[#F9F9F9] text-2xl font-bold mb-0.5">Save your backup codes</h2>
+        <p className="text-[#FFFFFF60] text-[13px] mb-4">
+          Each code works once if you lose your authenticator. They will <span className="text-white font-medium">not</span> be shown again.
+        </p>
+
+        <div className="grid grid-cols-2 gap-2 bg-zinc-900 border border-zinc-800 rounded-lg p-4 mb-3">
+          {backupCodes.map((code) => (
+            <span key={code} className="text-[#F9F9F9] text-sm font-mono text-center tracking-wider">{code}</span>
+          ))}
+        </div>
+
+        <button
+          onClick={copyBackupCodes}
+          className="w-full bg-[#18181b80] border border-[#A1A1A120] text-[#F9F9F9] text-sm py-2 rounded-lg hover:bg-gray-900 transition-colors mb-4 cursor-pointer flex items-center justify-center gap-2"
+        >
+          <Copy size={15} /> Copy codes
+        </button>
+
+        <label className="flex items-start gap-2 mb-4 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={savedAck}
+            onChange={(e) => setSavedAck(e.target.checked)}
+            className="mt-0.5 accent-[#007acc]"
+          />
+          <span className="text-[#FFFFFF60] text-xs">I have saved these backup codes in a safe place</span>
+        </label>
+
+        <button
+          onClick={finishBackupCodes}
+          disabled={!savedAck}
+          className="w-full bg-[#007acc70] text-white text-sm font-medium py-2.5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        >
+          Continue to dashboard
+        </button>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-9 h-screen w-full bg-black overflow-hidden">
+    <>
+      {/* Toaster + success toast are fixed-position and must NOT be grid children
+          (a grid child consumes a column and pushes the form to a second row). */}
       <Toaster position="top-right" richColors theme="dark" />
-      {renderLeftPanel()}
-      {step === 'signin' && renderSignInStep()}
-      {step === 'credentials' && renderCredentialsStep()}
-      {step === 'organization' && renderOrganizationStep()}
-      {step === 'verification' && renderVerificationStep()}
+
+      <div className="grid grid-cols-1 lg:grid-cols-9 h-screen w-full bg-black overflow-hidden">
+        {renderLeftPanel()}
+        {step === 'signin' && renderSignInStep()}
+        {step === 'credentials' && renderCredentialsStep()}
+        {step === 'organization' && renderOrganizationStep()}
+        {step === 'verification' && renderVerificationStep()}
+        {step === 'mfa-code' && renderMfaCodeStep()}
+        {step === 'mfa-enroll' && renderMfaEnrollStep()}
+        {step === 'backup-codes' && renderBackupCodesStep()}
+      </div>
 
       {showSuccessToast && (
-        <div className="fixed bottom-2 right-4 bg-zinc-900 border border-zinc-800 rounded-xl p-4 shadow-2xl">
+        <div className="fixed bottom-2 right-4 bg-zinc-900 border border-zinc-800 rounded-xl p-4 shadow-2xl z-50">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-green-500/10 rounded-full flex items-center justify-center">
               <Check className="text-green-900" size={20} />
@@ -499,7 +771,7 @@ const HasaPayOnboarding = () => {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 };
 

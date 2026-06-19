@@ -52,18 +52,23 @@ const StatCard = ({ value, label, color }: { value: number; label: string; color
 const StatusBadge = ({ status }: { status: string }) => (
   <span className={`px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${
     status === 'active' ? 'bg-[#16a34a20] text-[#16a34a]'
-    : status === 'pending' ? 'bg-[#FFC10720] text-[#FFC107]'
-    : 'bg-[#dc262620] text-[#dc2626]'
+    : status === 'suspended' || status === 'closed' ? 'bg-[#dc262620] text-[#dc2626]'
+    : 'bg-[#FFC10720] text-[#FFC107]'
   }`}>{status}</span>
 );
 
-type PendingAction = { kind: 'approve' | 'suspend'; org: AdminOrganization } | null;
+type ActionKind = 'approve' | 'suspend' | 'unsuspend';
+type PendingAction = { kind: ActionKind; org: AdminOrganization } | null;
+
+// Statuses that precede activation (an org awaiting approval).
+const PRE_ACTIVATION = ['registration', 'verification', 'setup', 'pending'];
+const isPreActivation = (s: string) => PRE_ACTIVATION.includes(s);
 
 const ActionsDropdown: React.FC<{
   org: AdminOrganization;
   isOpen: boolean;
   onToggle: () => void;
-  onAction: (action: 'approve' | 'suspend' | 'website') => void;
+  onAction: (action: ActionKind | 'website') => void;
 }> = ({ org, isOpen, onToggle, onAction }) => {
   const [pos, setPos] = useState<'bottom' | 'top'>('bottom');
   const [animating, setAnimating] = useState(false);
@@ -106,12 +111,13 @@ const ActionsDropdown: React.FC<{
               bottom: pos === 'top' && btnRef.current ? `${window.innerHeight - btnRef.current.getBoundingClientRect().top + 8}px` : 'auto',
             }}
           >
+            <Link href={`/admin/organizations/${org.id}`} onClick={onToggle} className="w-full px-2 md:px-4 py-1.5 md:py-2.5 text-left flex items-center gap-3 text-xs md:text-sm cursor-pointer hover:bg-[#FFFFFF10] text-[#F9F9F9]">
+              <Eye className="md:w-4 md:h-4 w-3 h-3" />View details
+            </Link>
             {org.website && item('Visit Website', <Globe className="md:w-4 md:h-4 w-3 h-3" />, () => onAction('website'))}
-            {org.status === 'pending' && item('Approve Organization', <CheckCircle2 className="md:w-4 md:h-4 w-3 h-3" />, () => onAction('approve'), false, true)}
-            {org.status === 'suspended' && item('Reactivate Organization', <CheckCircle2 className="md:w-4 md:h-4 w-3 h-3" />, () => onAction('approve'), false, true)}
+            {isPreActivation(org.status) && item('Approve Organization', <CheckCircle2 className="md:w-4 md:h-4 w-3 h-3" />, () => onAction('approve'), false, true)}
+            {org.status === 'suspended' && item('Reactivate Organization', <CheckCircle2 className="md:w-4 md:h-4 w-3 h-3" />, () => onAction('unsuspend'), false, true)}
             {org.status === 'active' && item('Suspend Organization', <Ban className="md:w-4 md:h-4 w-3 h-3" />, () => onAction('suspend'), true)}
-            {!org.website && org.status !== 'pending' && org.status !== 'suspended' && org.status !== 'active' &&
-              item('No actions', <Eye className="md:w-4 md:h-4 w-3 h-3" />, () => {})}
           </div>
         </>
       )}
@@ -126,6 +132,14 @@ const ActionModal: React.FC<{ action: PendingAction; onClose: () => void; onDone
   if (!action) return null;
 
   const isSuspend = action.kind === 'suspend';
+  const isApprove = action.kind === 'approve';
+  const titleText = isSuspend ? 'Suspend organization' : isApprove ? 'Approve organization' : 'Reactivate organization';
+  const msgText = isSuspend
+    ? `This will suspend "${action.org.name}". Provide a reason for the record.`
+    : isApprove
+    ? `This will approve and activate "${action.org.name}".`
+    : `This will reactivate "${action.org.name}" (status → active).`;
+  const btnText = isSuspend ? 'Suspend' : isApprove ? 'Approve' : 'Reactivate';
 
   const confirm = async () => {
     if (isSuspend && !reason.trim()) return;
@@ -134,9 +148,12 @@ const ActionModal: React.FC<{ action: PendingAction; onClose: () => void; onDone
       if (isSuspend) {
         await adminOrgsApi.suspend(action.org.id, reason.trim());
         toast.success(`${action.org.name} suspended`);
-      } else {
+      } else if (isApprove) {
         await adminOrgsApi.approve(action.org.id);
         toast.success(`${action.org.name} approved`);
+      } else {
+        await adminOrgsApi.unsuspend(action.org.id);
+        toast.success(`${action.org.name} reactivated`);
       }
       onDone();
     } catch (error: any) {
@@ -149,14 +166,8 @@ const ActionModal: React.FC<{ action: PendingAction; onClose: () => void; onDone
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="bg-[#18181b] border border-[#A1A1A120] rounded-xl w-full max-w-md p-5">
-        <h3 className="text-lg text-[#F9F9F9] font-semibold mb-1">
-          {isSuspend ? 'Suspend organization' : 'Approve organization'}
-        </h3>
-        <p className="text-sm text-[#FFFFFF60] mb-4">
-          {isSuspend
-            ? `This will suspend "${action.org.name}". Provide a reason for the record.`
-            : `This will approve and activate "${action.org.name}".`}
-        </p>
+        <h3 className="text-lg text-[#F9F9F9] font-semibold mb-1">{titleText}</h3>
+        <p className="text-sm text-[#FFFFFF60] mb-4">{msgText}</p>
         {isSuspend && (
           <textarea
             autoFocus
@@ -177,7 +188,7 @@ const ActionModal: React.FC<{ action: PendingAction; onClose: () => void; onDone
             className={`flex-1 text-white py-2.5 rounded-lg transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 ${isSuspend ? 'bg-red-500/80 hover:bg-red-500' : 'bg-[#16a34a]/80 hover:bg-[#16a34a]'}`}
           >
             {submitting && <Loader2 size={16} className="animate-spin" />}
-            {isSuspend ? 'Suspend' : 'Approve'}
+            {btnText}
           </button>
         </div>
       </div>
@@ -211,7 +222,8 @@ export default function AdminOrganizationsPage() {
   }, []);
 
   const filtered = orgs.filter((o) => {
-    if (statusFilter !== 'All Status' && o.status !== statusFilter.toLowerCase()) return false;
+    if (statusFilter === 'Pending' && !isPreActivation(o.status)) return false;
+    if (statusFilter !== 'All Status' && statusFilter !== 'Pending' && o.status !== statusFilter.toLowerCase()) return false;
     if (search) {
       const q = search.toLowerCase();
       return o.name.toLowerCase().includes(q) || o.email.toLowerCase().includes(q);
@@ -219,7 +231,7 @@ export default function AdminOrganizationsPage() {
     return true;
   });
 
-  const handleAction = (action: 'approve' | 'suspend' | 'website', org: AdminOrganization) => {
+  const handleAction = (action: ActionKind | 'website', org: AdminOrganization) => {
     if (action === 'website') {
       if (org.website) window.open(org.website, '_blank', 'noopener');
       return;
@@ -238,7 +250,7 @@ export default function AdminOrganizationsPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-6 mb-8">
         <StatCard value={orgs.length} label="Total Organizations" color="text-[#F9F9F9]" />
         <StatCard value={orgs.filter((o) => o.email_verified).length} label="Verified" color="text-[#16a34a]" />
-        <StatCard value={orgs.filter((o) => o.status === 'pending').length} label="Pending Approval" color="text-[#FFC107]" />
+        <StatCard value={orgs.filter((o) => isPreActivation(o.status)).length} label="Pending Approval" color="text-[#FFC107]" />
         <StatCard value={orgs.filter((o) => o.status === 'suspended').length} label="Suspended" color="text-[#dc2626]" />
       </div>
 

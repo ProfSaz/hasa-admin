@@ -42,10 +42,12 @@ export default function AdminAuditLogsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [actionFilter, setActionFilter] = useState('All Actions');
   const [resourceFilter, setResourceFilter] = useState('All Resources');
+  const [actorFilter, setActorFilter] = useState('All Actors');
   const [search, setSearch] = useState('');
 
   const actionOptions = ['All Actions', 'Login', 'Create', 'Update', 'Delete', 'Verify', 'Suspend'];
   const resourceOptions = ['All Resources', 'User', 'Organization', 'Wallet', 'Transaction', 'Api Key', 'Admin'];
+  const actorOptions = ['All Actors', 'Admin', 'Organization', 'System'];
 
   const load = useCallback(async () => {
     setIsLoading(true);
@@ -54,7 +56,8 @@ export default function AdminAuditLogsPage() {
         resourceFilter === 'All Resources'
           ? undefined
           : resourceFilter.toLowerCase().replace(' ', '_'); // "Api Key" -> "api_key"
-      const { logs, count } = await adminAuditApi.list({ resource });
+      const actorType = actorFilter === 'All Actors' ? undefined : actorFilter.toLowerCase();
+      const { logs, count } = await adminAuditApi.list({ resource, actorType });
       setLogs(logs);
       setTotal(count);
     } catch (error) {
@@ -62,7 +65,7 @@ export default function AdminAuditLogsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [resourceFilter]);
+  }, [resourceFilter, actorFilter]);
 
   useEffect(() => {
     load();
@@ -127,6 +130,7 @@ export default function AdminAuditLogsPage() {
               />
             </div>
             <div className="flex items-center justify-center gap-1 md:gap-2">
+              <CustomDropdown label="Actor" options={actorOptions} value={actorFilter} onChange={setActorFilter} />
               <CustomDropdown label="Actions" options={actionOptions} value={actionFilter} onChange={setActionFilter} />
               <CustomDropdown label="Resources" options={resourceOptions} value={resourceFilter} onChange={setResourceFilter} />
             </div>
