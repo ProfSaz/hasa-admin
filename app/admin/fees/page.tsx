@@ -348,8 +348,10 @@ function AddChainOverride({ orgId, onAdded }: { orgId: string; onAdded: () => vo
   const [busy, setBusy] = useState(false);
 
   // Chain/network and token come from the live chain + asset registries.
+  // Only ACTIVE chains can take a fee override (redacted chains like bsc/base/aptos
+  // are filtered out — they're still visible on the Chains management page).
   useEffect(() => {
-    chainsApi.list().then(setChains).catch(() => {});
+    chainsApi.list().then((cs) => setChains(cs.filter((c) => c.is_active))).catch(() => {});
     assetsApi.list().then(setAssets).catch(() => {});
   }, []);
 

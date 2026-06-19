@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { assetsApi, SupportedAsset, CreateAssetRequest } from '@/lib/api/assets';
 import { chainsApi, SupportedChain } from '@/lib/api/chains';
 
-const ASSET_TYPES = ['native', 'erc20', 'spl', 'bep20', 'trc20'];
+const ASSET_TYPES = ['native', 'erc20', 'spl', 'trc20'];
 
 export default function AssetsPage() {
   const [assets, setAssets] = useState<SupportedAsset[]>([]);
@@ -153,8 +153,10 @@ export default function AssetsPage() {
 }
 
 function CreateAssetModal({ chains, onClose, onDone }: { chains: SupportedChain[]; onClose: () => void; onDone: () => void }) {
+  // New assets can only be added to ACTIVE chains (redacted chains are excluded).
+  const activeChains = chains.filter((c) => c.is_active);
   const [form, setForm] = useState<CreateAssetRequest>({
-    chain_id: chains[0]?.id ?? '', asset_type: 'erc20', symbol: '', name: '', decimals: 18, contract_address: '', is_stablecoin: false,
+    chain_id: activeChains[0]?.id ?? '', asset_type: 'erc20', symbol: '', name: '', decimals: 18, contract_address: '', is_stablecoin: false,
   });
   const [loading, setLoading] = useState(false);
   const valid = form.chain_id && form.symbol && form.name && form.decimals >= 0;
@@ -175,7 +177,7 @@ function CreateAssetModal({ chains, onClose, onDone }: { chains: SupportedChain[
     <Modal title="New asset" onClose={onClose}>
       <Field label="Chain">
         <select value={form.chain_id} onChange={(e) => setForm({ ...form, chain_id: e.target.value })} className={inputCls}>
-          {chains.map((c) => <option key={c.id} value={c.id}>{c.chain}/{c.network}</option>)}
+          {activeChains.map((c) => <option key={c.id} value={c.id}>{c.chain}/{c.network}</option>)}
         </select>
       </Field>
       <Field label="Type">

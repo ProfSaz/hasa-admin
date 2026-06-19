@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { chainsApi, SupportedChain, RPCEndpoint, CreateChainRequest } from '@/lib/api/chains';
 import { confirmDialog } from '@/lib/stores/confirmStore';
 
-const CHAIN_TYPES = ['evm', 'solana', 'bitcoin', 'tron', 'aptos'];
+const CHAIN_TYPES = ['evm', 'solana', 'bitcoin', 'tron'];
 
 export default function ChainsPage() {
   const [chains, setChains] = useState<SupportedChain[]>([]);
