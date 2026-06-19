@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { Search, Bell, Menu } from 'lucide-react';
+import { ModeToggle } from './ModeToggle';
 
 export const AdminHeader: React.FC<{ onMenuClick: () => void }> = ({ onMenuClick }) => {
   return (
@@ -29,11 +30,8 @@ export const AdminHeader: React.FC<{ onMenuClick: () => void }> = ({ onMenuClick
       
       {/* Right Side */}
       <div className="flex items-center gap-3">
-        {/* Admin Mode Badge */}
-        <div className="flex items-center gap-1 md:gap-2 bg-[#dc262610] border border-[#dc262630] px-2 md:px-3 py-1 md:py-1.5 rounded-full">
-          <div className="w-1.5 h-1.5 md:w-2 md:h-2 bg-[#dc2626] rounded-full animate-pulse"></div>
-          <span className="text-[#dc2626] text-[10px] md:text-xs font-medium">Admin Mode</span>
-        </div>
+        {/* Test/Live data scope */}
+        <ModeToggle />
 
         {/* Notification */}
         <button className="relative p-2 hover:bg-[#FFFFFF10] rounded-lg transition-colors">
