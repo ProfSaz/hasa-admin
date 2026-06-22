@@ -29,6 +29,8 @@ export interface OrgDetail {
   organization: AdminOrganization;
   dashboard_wallet_creation_enabled: boolean;
   dashboard_payouts_enabled: boolean;
+  co_custody_enabled: boolean;
+  onflight_fee_collection: boolean;
 }
 
 // Ledger balance attached to a wallet/address (mode-scoped server-side).
@@ -80,6 +82,8 @@ export const adminOrgsApi = {
       organization: response.data.organization,
       dashboard_wallet_creation_enabled: !!response.data.dashboard_wallet_creation_enabled,
       dashboard_payouts_enabled: !!response.data.dashboard_payouts_enabled,
+      co_custody_enabled: !!response.data.co_custody_enabled,
+      onflight_fee_collection: !!response.data.onflight_fee_collection,
     };
   },
 
@@ -108,6 +112,15 @@ export const adminOrgsApi = {
     await apiClient.put(`/admin/organizations/${id}/dashboard-flags`, {
       dashboard_wallet_creation_enabled: walletCreation,
       dashboard_payouts_enabled: payouts,
+    });
+  },
+
+  // Toggle the org's co-custody features (customer-held key fragments +
+  // on-flight fee collection). Platform admin.
+  setCoCustodyFlags: async (id: string, coCustody: boolean, onflightFee: boolean): Promise<void> => {
+    await apiClient.put(`/admin/organizations/${id}/cocustody-flags`, {
+      co_custody_enabled: coCustody,
+      onflight_fee_collection: onflightFee,
     });
   },
 

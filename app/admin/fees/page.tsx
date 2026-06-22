@@ -279,6 +279,10 @@ function OrgFeeEditor({ orgId, orgName, onClose, onSaved }: { orgId: string; org
         deposit_fee_rate: cfg.deposit_fee_rate,
         withdrawal_fee_enabled: cfg.withdrawal_fee_enabled,
         withdrawal_fee_rate: cfg.withdrawal_fee_rate,
+        // Org fees — what the org charges its OWN end-users (its revenue).
+        org_fee_enabled: cfg.org_fee_enabled,
+        org_deposit_fee_rate: cfg.org_deposit_fee_rate,
+        org_withdrawal_fee_rate: cfg.org_withdrawal_fee_rate,
         rev_share_enabled: cfg.rev_share_enabled,
         rev_share_percentage: cfg.rev_share_percentage,
         min_deposit_usd: cfg.min_deposit_usd,
@@ -325,6 +329,17 @@ function OrgFeeEditor({ orgId, orgName, onClose, onSaved }: { orgId: string; org
               <RateRow label="Withdrawal fee" enabled={cfg.withdrawal_fee_enabled}
                 onToggle={(v) => setCfg({ ...cfg, withdrawal_fee_enabled: v })}
                 ratePct={pct(cfg.withdrawal_fee_rate)} onRate={(v) => setCfg({ ...cfg, withdrawal_fee_rate: (parseFloat(v) || 0) / 100 })} />
+
+              <div className="pt-1">
+                <div className="text-[11px] uppercase tracking-wide text-[#FFFFFF50] mb-1">Org fees — charged to the org&apos;s own customers (the org&apos;s revenue)</div>
+              </div>
+              <RateRow label="Org deposit fee" enabled={cfg.org_fee_enabled}
+                onToggle={(v) => setCfg({ ...cfg, org_fee_enabled: v })}
+                ratePct={pct(cfg.org_deposit_fee_rate)} onRate={(v) => setCfg({ ...cfg, org_deposit_fee_rate: (parseFloat(v) || 0) / 100 })} />
+              <RateRow label="Org withdrawal fee" enabled={cfg.org_fee_enabled}
+                onToggle={(v) => setCfg({ ...cfg, org_fee_enabled: v })}
+                ratePct={pct(cfg.org_withdrawal_fee_rate)} onRate={(v) => setCfg({ ...cfg, org_withdrawal_fee_rate: (parseFloat(v) || 0) / 100 })} />
+
               <RateRow label="Revenue share" enabled={cfg.rev_share_enabled}
                 onToggle={(v) => setCfg({ ...cfg, rev_share_enabled: v })}
                 ratePct={pct(cfg.rev_share_percentage)} onRate={(v) => setCfg({ ...cfg, rev_share_percentage: (parseFloat(v) || 0) / 100 })} />

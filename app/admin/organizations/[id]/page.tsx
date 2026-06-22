@@ -69,6 +69,8 @@ export default function OrgDetailPage() {
   const [stats, setStats] = useState<OrgDetailedStats | null>(null);
   const [walletFlag, setWalletFlag] = useState(false);
   const [payoutFlag, setPayoutFlag] = useState(false);
+  const [coCustodyFlag, setCoCustodyFlag] = useState(false);
+  const [onflightFlag, setOnflightFlag] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null);
   const [actioning, setActioning] = useState(false);
@@ -80,6 +82,8 @@ export default function OrgDetailPage() {
       setOrg(detail.organization);
       setWalletFlag(detail.dashboard_wallet_creation_enabled);
       setPayoutFlag(detail.dashboard_payouts_enabled);
+      setCoCustodyFlag(detail.co_custody_enabled);
+      setOnflightFlag(detail.onflight_fee_collection);
     } catch (error) {
       console.error('Failed to load org:', error);
       toast.error('Failed to load organization');
@@ -106,6 +110,20 @@ export default function OrgDetailPage() {
       setWalletFlag(wallet);
       setPayoutFlag(payouts);
       toast.success('Dashboard access updated');
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error?.message || 'Failed to update');
+    } finally {
+      setSaving(null);
+    }
+  };
+
+  const saveCoCustodyFlags = async (coCustody: boolean, onflight: boolean, key: string) => {
+    setSaving(key);
+    try {
+      await adminOrgsApi.setCoCustodyFlags(id, coCustody, onflight);
+      setCoCustodyFlag(coCustody);
+      setOnflightFlag(onflight);
+      toast.success('Co-custody settings updated');
     } catch (error: any) {
       toast.error(error?.response?.data?.error?.message || 'Failed to update');
     } finally {
@@ -304,6 +322,32 @@ export default function OrgDetailPage() {
           <InfoRow label="Verified" value={org.email_verified ? 'Yes' : 'No'} />
           <InfoRow label="Website" value={org.website ? <a href={org.website} target="_blank" rel="noopener" className="text-[#007acc] inline-flex items-center gap-1">Visit <Globe size={12} /></a> : '—'} />
           <InfoRow label="Created" value={org.created_at ? new Date(org.created_at).toLocaleDateString() : '—'} />
+        </div>
+      </div>
+
+      {/* Co-custody — customer-held key fragments */}
+      <div className="mt-6 bg-[#18181b70] border border-[#A1A1A120] rounded-xl p-4 md:p-6">
+        <h2 className="text-lg font-semibold text-[#F9F9F9] mb-1">Co-custody</h2>
+        <p className="text-sm text-[#FFFFFF60] mb-5">Let this org hand customers a recoverable copy of a master wallet&apos;s key (passphrase + two fragments). HASA keeps its own management copy — this is co-custody, not hand-off.</p>
+
+        <div className="space-y-3">
+          <div className="bg-[#18181b] rounded-lg p-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[#F9F9F9] font-medium">Co-custody wallets</div>
+              <div className="text-xs text-[#FFFFFF60]">Allow the org to mark wallets as co-custody and mint key fragments for the customer (owner/admin + MFA)</div>
+            </div>
+            {saving === 'cocustody' ? <Loader2 size={18} className="animate-spin text-[#FFFFFF60]" /> :
+              <ToggleSwitch enabled={coCustodyFlag} onChange={() => saveCoCustodyFlags(!coCustodyFlag, onflightFlag, 'cocustody')} />}
+          </div>
+
+          <div className="bg-[#18181b] rounded-lg p-4 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-[#F9F9F9] font-medium">On-flight fee collection</div>
+              <div className="text-xs text-[#FFFFFF60]">Take the fee on-chain at the child→master sweep so it&apos;s guaranteed even when the customer can move the master</div>
+            </div>
+            {saving === 'onflight' ? <Loader2 size={18} className="animate-spin text-[#FFFFFF60]" /> :
+              <ToggleSwitch enabled={onflightFlag} onChange={() => saveCoCustodyFlags(coCustodyFlag, !onflightFlag, 'onflight')} />}
+          </div>
         </div>
       </div>
 
