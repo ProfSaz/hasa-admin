@@ -69,6 +69,22 @@ export interface OrgAddress {
   balance_usd: number;
 }
 
+export interface OrgFeeWallet {
+  id: string;
+  chain: string;
+  network: string;
+  is_testnet: boolean;
+  address: string;
+  native_symbol: string;
+  native_decimals: number;
+  balance: string; // human-readable native amount
+  balance_raw: string; // smallest unit
+  low_gas: boolean;
+  balance_known: boolean; // false = RPC unavailable, balance is a placeholder
+  is_active: boolean;
+  created_at?: string;
+}
+
 export const adminOrgsApi = {
   list: async (): Promise<AdminOrganization[]> => {
     const response = await apiClient.get('/admin/organizations');
@@ -144,5 +160,12 @@ export const adminOrgsApi = {
       page: pag.page ?? 1,
       pages: pag.pages ?? 0,
     };
+  },
+
+  // Gas/fee wallets for an org with LIVE on-chain native balance + low-gas flag.
+  // Returns both mainnet + testnet rows tagged with is_testnet; the UI splits by mode.
+  listFeeWallets: async (id: string): Promise<OrgFeeWallet[]> => {
+    const res = await apiClient.get(`/admin/organizations/${id}/fee-wallets`);
+    return res.data.data?.fee_wallets ?? [];
   },
 };

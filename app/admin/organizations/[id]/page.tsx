@@ -2,14 +2,14 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, Wallet, Users, Activity, Globe, Building2, CheckCircle2, Ban, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, Loader2, Wallet, Users, Activity, Globe, Building2, CheckCircle2, Ban, ShieldCheck, Fuel, AlertTriangle } from 'lucide-react';
 import { toast } from 'sonner';
-import { adminOrgsApi, AdminOrganization, OrgWallet, OrgAddress, LedgerBalance } from '@/lib/api/organizations';
+import { adminOrgsApi, AdminOrganization, OrgWallet, OrgAddress, OrgFeeWallet, LedgerBalance } from '@/lib/api/organizations';
 import { adminStatsApi, OrgDetailedStats, formatUSD } from '@/lib/api/stats';
 import { adminTransactionsApi, AdminTransaction, displayAmount } from '@/lib/api/transactions';
 import { confirmDialog } from '@/lib/stores/confirmStore';
 
-type DetailTab = 'overview' | 'wallets' | 'addresses' | 'transactions';
+type DetailTab = 'overview' | 'wallets' | 'addresses' | 'transactions' | 'gas';
 
 // Format a raw base-unit balance string into human units using token decimals.
 const fmtBalance = (raw: string, decimals: number): string => {
@@ -272,7 +272,7 @@ export default function OrgDetailPage() {
 
       {/* Tabs */}
       <div className="flex items-center gap-1 border-b border-[#A1A1A120] mb-6 overflow-x-auto">
-        {(['overview', 'wallets', 'addresses', 'transactions'] as DetailTab[]).map((t) => (
+        {(['overview', 'wallets', 'addresses', 'transactions', 'gas'] as DetailTab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -280,7 +280,7 @@ export default function OrgDetailPage() {
               tab === t ? 'border-[#007acc] text-[#F9F9F9]' : 'border-transparent text-[#FFFFFF60] hover:text-[#F9F9F9]'
             }`}
           >
-            {t}
+            {t === 'gas' ? 'Gas wallets' : t}
           </button>
         ))}
       </div>
@@ -375,6 +375,7 @@ export default function OrgDetailPage() {
       {tab === 'wallets' && <WalletsTab orgId={id} />}
       {tab === 'addresses' && <AddressesTab orgId={id} />}
       {tab === 'transactions' && <TransactionsTab orgId={id} />}
+      {tab === 'gas' && <GasTab orgId={id} />}
     </div>
   );
 }
@@ -541,6 +542,79 @@ function TransactionsTab({ orgId }: { orgId: string }) {
             <button onClick={() => setPage((p) => Math.min(pages, p + 1))} disabled={page >= pages} className="text-[12px] text-[#F9F9F9] border border-[#A1A1A120] rounded-lg px-3 py-1.5 hover:bg-[#FFFFFF10] cursor-pointer disabled:opacity-40">Next</button>
           </div>
         </div>
+      )}
+    </TableCard>
+  );
+}
+
+// ── Gas / fee wallets ───────────────────────────────────────────────────────────
+// Per-org gas tank wallets with LIVE on-chain native balance. Unlike the other tabs
+// (mode-scoped server-side), the fee-wallet endpoint returns BOTH mainnet + testnet so
+// the operator sees the whole picture at a glance — we split them into Live / Test here.
+function GasTab({ orgId }: { orgId: string }) {
+  const [feeWallets, setFeeWallets] = useState<OrgFeeWallet[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    adminOrgsApi.listFeeWallets(orgId)
+      .then((fw) => active && setFeeWallets(fw))
+      .catch(() => active && toast.error('Failed to load gas wallets'))
+      .finally(() => active && setLoading(false));
+    return () => { active = false; };
+  }, [orgId]);
+
+  if (loading) return <div className="flex justify-center py-16"><Loader2 size={24} className="animate-spin text-[#FFFFFF60]" /></div>;
+  if (feeWallets.length === 0) return <TableCard><div className="text-center py-10 text-[#FFFFFF60]">This org has no gas/fee wallets yet</div></TableCard>;
+
+  const live = feeWallets.filter((f) => !f.is_testnet);
+  const test = feeWallets.filter((f) => f.is_testnet);
+
+  return (
+    <div className="space-y-6">
+      <GasSection title="Live" subtitle="Mainnet gas tanks — fund these so stablecoin sweeps & on-flight fees can be paid gaslessly" wallets={live} />
+      <GasSection title="Test" subtitle="Testnet gas tanks" wallets={test} />
+    </div>
+  );
+}
+
+function GasSection({ title, subtitle, wallets }: { title: string; subtitle: string; wallets: OrgFeeWallet[] }) {
+  return (
+    <TableCard>
+      <div className="flex items-center gap-2 mb-1">
+        <Fuel size={16} className="text-[#FFFFFF60]" />
+        <h3 className="text-sm font-semibold text-[#F9F9F9]">{title}</h3>
+        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${title === 'Live' ? 'bg-[#16a34a20] text-[#16a34a]' : 'bg-[#FFC10720] text-[#FFC107]'}`}>{wallets.length}</span>
+      </div>
+      <p className="text-xs text-[#FFFFFF60] mb-4">{subtitle}</p>
+      {wallets.length === 0 ? (
+        <div className="text-center py-6 text-[#FFFFFF40] text-sm">No {title.toLowerCase()} gas wallets</div>
+      ) : (
+        <table className="w-full min-w-[680px] text-xs md:text-sm">
+          <thead><tr className="border-b border-[#A1A1A120]"><Th>Chain</Th><Th>Address</Th><Th>Gas balance</Th><Th>Status</Th></tr></thead>
+          <tbody>
+            {wallets.map((f) => (
+              <tr key={f.id} className="border-b border-[#A1A1A120] hover:bg-[#FFFFFF05]">
+                <td className="py-3 pr-6 whitespace-nowrap text-[11px]">{f.chain}/{f.network}</td>
+                <td className="py-3 pr-6 font-mono text-[11px] text-[#FFFFFF80]">{shortMid(f.address)}</td>
+                <td className="py-3 pr-6 whitespace-nowrap">
+                  <span className={`font-mono text-[12px] ${f.low_gas ? 'text-[#dc2626]' : 'text-[#F9F9F9]'}`}>{f.balance}</span>{' '}
+                  <span className="text-[#FFFFFF60] text-[11px]">{f.native_symbol}</span>
+                </td>
+                <td className="py-3 pr-6 whitespace-nowrap">
+                  {!f.balance_known ? (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-[#FFFFFF60]"><AlertTriangle size={12} /> RPC unavailable</span>
+                  ) : f.low_gas ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#dc262620] text-[#dc2626]"><AlertTriangle size={11} /> Low gas</span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-[#16a34a20] text-[#16a34a]"><CheckCircle2 size={11} /> Funded</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
     </TableCard>
   );
