@@ -405,8 +405,9 @@ const Th = ({ children }: { children: React.ReactNode }) => (
 function WalletsTab({ orgId }: { orgId: string }) {
   const [wallets, setWallets] = useState<OrgWallet[]>([]);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = React.useCallback(() => {
     let active = true;
     setLoading(true);
     adminOrgsApi.listWallets(orgId)
@@ -416,22 +417,92 @@ function WalletsTab({ orgId }: { orgId: string }) {
     return () => { active = false; };
   }, [orgId]);
 
+  useEffect(() => load(), [load]);
+
+  const authorizeRegen = async (w: OrgWallet) => {
+    // confirmDialog resolves to '' on confirm (no input field) and null on
+    // cancel — so check === null, not falsiness ('' is falsy and would abort).
+    const confirmed = await confirmDialog({
+      title: 'Authorize fragment regeneration?',
+      message: `This grants ${w.wallet.chain}/${w.wallet.network} a ONE-TIME pass to regenerate its co-custody recovery fragments. The org performs the regeneration with its own passphrase — minting a fresh recovery set invalidates their previously saved fragments. The grant is consumed automatically once they regenerate.`,
+      confirmLabel: 'Authorize',
+      danger: true,
+    });
+    if (confirmed === null) return;
+    setBusy(w.wallet.id);
+    try {
+      await adminOrgsApi.authorizeFragmentRegen(orgId, w.wallet.id);
+      toast.success('Regeneration authorized');
+      load();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || 'Failed to authorize');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const revokeRegen = async (w: OrgWallet) => {
+    setBusy(w.wallet.id);
+    try {
+      await adminOrgsApi.revokeFragmentRegen(orgId, w.wallet.id);
+      toast.success('Authorization revoked');
+      load();
+    } catch (e: any) {
+      toast.error(e?.response?.data?.error?.message || 'Failed to revoke');
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (loading) return <div className="flex justify-center py-16"><Loader2 size={24} className="animate-spin text-[#FFFFFF60]" /></div>;
   if (wallets.length === 0) return <TableCard><div className="text-center py-10 text-[#FFFFFF60]">No master wallets in this mode</div></TableCard>;
 
   return (
     <TableCard>
-      <table className="w-full min-w-[680px] text-xs md:text-sm">
-        <thead><tr className="border-b border-[#A1A1A120]"><Th>Chain</Th><Th>Address</Th><Th>Balances</Th><Th>Created</Th></tr></thead>
+      <table className="w-full min-w-[760px] text-xs md:text-sm">
+        <thead><tr className="border-b border-[#A1A1A120]"><Th>Chain</Th><Th>Address</Th><Th>Balances</Th><Th>Co-custody</Th><Th>Created</Th></tr></thead>
         <tbody>
-          {wallets.map((w) => (
-            <tr key={w.wallet.id} className="border-b border-[#A1A1A120] hover:bg-[#FFFFFF05]">
-              <td className="py-3 pr-6 whitespace-nowrap text-[11px]">{w.wallet.chain}/{w.wallet.network}</td>
-              <td className="py-3 pr-6 font-mono text-[11px] text-[#FFFFFF80]">{shortMid(w.wallet.address)}</td>
-              <td className="py-3 pr-6"><BalancesCell balances={w.balances} totalUsd={w.balance_usd} /></td>
-              <td className="py-3 pr-6 whitespace-nowrap text-[#FFFFFF60] text-[11px]">{w.wallet.created_at ? new Date(w.wallet.created_at).toLocaleDateString() : '—'}</td>
-            </tr>
-          ))}
+          {wallets.map((w) => {
+            const isCoCustody = w.wallet.custody_type === 'co_custody';
+            return (
+              <tr key={w.wallet.id} className="border-b border-[#A1A1A120] hover:bg-[#FFFFFF05]">
+                <td className="py-3 pr-6 whitespace-nowrap text-[11px]">{w.wallet.chain}/{w.wallet.network}</td>
+                <td className="py-3 pr-6 font-mono text-[11px] text-[#FFFFFF80]">{shortMid(w.wallet.address)}</td>
+                <td className="py-3 pr-6"><BalancesCell balances={w.balances} totalUsd={w.balance_usd} /></td>
+                <td className="py-3 pr-6 whitespace-nowrap text-[11px]">
+                  {!isCoCustody ? (
+                    <span className="text-[#FFFFFF40]">—</span>
+                  ) : !w.fragments_generated ? (
+                    <span className="text-[#FFFFFF60]">No fragments yet</span>
+                  ) : w.regen_authorized ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#facc15]">Regen authorized</span>
+                      <button
+                        onClick={() => revokeRegen(w)}
+                        disabled={busy === w.wallet.id}
+                        className="text-[#FFFFFF60] hover:text-[#F9F9F9] underline underline-offset-2 disabled:opacity-50"
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[#4ade80]">Fragments generated</span>
+                      <button
+                        onClick={() => authorizeRegen(w)}
+                        disabled={busy === w.wallet.id}
+                        className="flex items-center gap-1 text-[#007acc] hover:text-[#3399dd] underline underline-offset-2 disabled:opacity-50"
+                      >
+                        {busy === w.wallet.id && <Loader2 size={11} className="animate-spin" />}
+                        Authorize regen
+                      </button>
+                    </div>
+                  )}
+                </td>
+                <td className="py-3 pr-6 whitespace-nowrap text-[#FFFFFF60] text-[11px]">{w.wallet.created_at ? new Date(w.wallet.created_at).toLocaleDateString() : '—'}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </TableCard>

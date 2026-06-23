@@ -49,10 +49,14 @@ export interface OrgWallet {
     chain: string;
     network: string;
     address: string;
+    custody_type?: string; // 'hasa' | 'co_custody'
     created_at?: string;
   };
   balances: LedgerBalance[];
   balance_usd: number;
+  // Co-custody fragment state (per wallet).
+  fragments_generated?: boolean; // org has minted its recovery set at least once
+  regen_authorized?: boolean; // a one-time admin grant to regenerate is pending
 }
 
 export interface OrgAddress {
@@ -144,6 +148,19 @@ export const adminOrgsApi = {
   listWallets: async (id: string): Promise<OrgWallet[]> => {
     const res = await apiClient.get(`/admin/organizations/${id}/wallets`);
     return res.data.data?.wallets ?? [];
+  },
+
+  // Grant a one-time pass for the org to regenerate co-custody fragments on a
+  // wallet that already has them. The admin only authorizes — the org regenerates
+  // with its own passphrase, and the grant is consumed on success. Step-up MFA is
+  // enforced server-side and handled automatically by the client interceptor.
+  authorizeFragmentRegen: async (orgId: string, walletId: string): Promise<void> => {
+    await apiClient.post(`/admin/organizations/${orgId}/wallets/${walletId}/cocustody/authorize-regen`);
+  },
+
+  // Withdraw a previously granted (and not-yet-consumed) regeneration pass.
+  revokeFragmentRegen: async (orgId: string, walletId: string): Promise<void> => {
+    await apiClient.delete(`/admin/organizations/${orgId}/wallets/${walletId}/cocustody/authorize-regen`);
   },
 
   // Child addresses for an org (mode-scoped, paginated) with attached balances.
