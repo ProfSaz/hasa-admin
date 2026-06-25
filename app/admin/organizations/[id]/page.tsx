@@ -16,7 +16,11 @@ const fmtBalance = (raw: string, decimals: number): string => {
   try {
     if (!raw) return '0';
     const neg = raw.startsWith('-');
-    const digits = (neg ? raw.slice(1) : raw).padStart(decimals + 1, '0');
+    // Balances are integer base units, but Postgres NUMERIC arrives as
+    // "791535.000000000000000000" — drop the (always-zero) fractional part so
+    // we don't mis-slice the decimal point into the figure.
+    const intPart = (neg ? raw.slice(1) : raw).split('.')[0];
+    const digits = intPart.padStart(decimals + 1, '0');
     const whole = digits.slice(0, digits.length - decimals) || '0';
     let frac = decimals > 0 ? digits.slice(digits.length - decimals) : '';
     frac = frac.replace(/0+$/, '');
