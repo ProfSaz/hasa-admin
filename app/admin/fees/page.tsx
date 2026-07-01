@@ -349,6 +349,18 @@ function OrgFeeEditor({ orgId, orgName, onClose, onSaved }: { orgId: string; org
                   onChange={(e) => setCfg({ ...cfg, min_deposit_usd: parseFloat(e.target.value) || 0 })}
                   className="w-28 bg-[#09090b] border border-[#A1A1A120] rounded-lg px-2 py-1.5 text-sm text-[#F9F9F9] text-right focus:outline-none focus:border-[#A1A1A140]" />
               </div>
+
+              <div className="border-t border-[#A1A1A120] pt-3 flex items-center justify-between gap-4">
+                <div>
+                  <span className="text-[#F9F9F9] text-sm font-medium">Gasless sweeps</span>
+                  <p className="text-[11px] text-[#FFFFFF60] mt-0.5 max-w-xs">Master wallet sponsors gas/rent for token sweeps. Required for Solana SPL &amp; Tron TRC-20 — off means the child pays and those sweeps fail.</p>
+                </div>
+                <button type="button" role="switch" aria-checked={cfg.gasless_enabled}
+                  onClick={() => setCfg({ ...cfg, gasless_enabled: !cfg.gasless_enabled })}
+                  className={`relative shrink-0 w-11 h-6 rounded-full transition-colors cursor-pointer ${cfg.gasless_enabled ? 'bg-[#007acc]' : 'bg-[#3f3f46]'}`}>
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${cfg.gasless_enabled ? 'translate-x-5' : ''}`} />
+                </button>
+              </div>
             </div>
             <button onClick={save} disabled={saving} className="w-full bg-[#007acc70] text-white text-sm font-medium py-2.5 rounded-lg disabled:opacity-50 cursor-pointer flex items-center justify-center gap-2 mb-5">
               {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />} Save org config
